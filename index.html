@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validador de digitación</title>
+<style>
+:root{--blue:#76a9d8;--yellow:#fff200;--border:#b9c5d1;--bg:#f4f7fb;--text:#17212b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font:14px Arial,sans-serif;color:var(--text)}
+header{background:#1e5b88;color:white;padding:20px 24px}h1{font-size:22px;margin:0 0 6px}header p{margin:0;color:#e8f2fb}
+main{padding:18px;max-width:1600px;margin:auto}.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+button{border:0;border-radius:7px;padding:10px 14px;cursor:pointer;font-weight:700;background:#1e5b88;color:white}
+button.secondary{background:#e1e9f1;color:#1b3448}button.danger{background:#a83232}
+.note{font-size:12px;color:#526272;margin:8px 0 14px}.table-wrap{overflow:auto;background:white;border:1px solid var(--border);border-radius:8px;max-height:68vh}
+table{border-collapse:collapse;min-width:1450px;width:100%;table-layout:fixed}
+th,td{border:1px solid var(--border);padding:0;text-align:left}
+th{position:sticky;top:0;z-index:2;background:var(--blue);color:#071c2d;padding:10px 7px;font-weight:700}
+th.checkhead{background:var(--yellow);text-align:center}
+td input{width:100%;height:34px;border:0;padding:7px;background:transparent;font:12px Arial,sans-serif;outline:none}
+td input:focus{background:#fff9d7;box-shadow:inset 0 0 0 2px #e3b100}
+td.result{padding:7px;font-size:12px;font-weight:bold;text-align:center;white-space:nowrap}
+.ok{background:#e4f7e9;color:#16723a}.bad{background:#fde8e8;color:#a51f1f}.empty{background:#f2f4f6;color:#687581}
+tr:nth-child(even) td.inputcell{background:#fafcff}.status{margin-left:auto;font-weight:bold;color:#365267}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin:12px 0}.pill{padding:6px 9px;border-radius:5px;font-size:12px;font-weight:bold}
+@media(max-width:700px){main{padding:10px}header{padding:16px}}
+</style>
+</head>
+<body>
+<header><h1>Validador de digitación</h1><p>Pega tus datos como en Excel y revisa automáticamente el teléfono, el correo y la observación.</p></header>
+<main>
+<div class="toolbar">
+<button id="validate">Validar toda la tabla</button>
+<button class="secondary" id="add">+ Agregar 10 filas</button>
+<button class="secondary" id="copy">Copiar resultados</button>
+<button class="secondary" id="clear">Limpiar tabla</button>
+<span class="status" id="summary">0 registros revisados</span>
+</div>
+<div class="note">Puedes seleccionar una celda y pegar un bloque copiado desde Excel o Google Sheets (Ctrl+V). Las columnas amarillas son resultados automáticos. Las columnas amarillas validan el teléfono, el correo y la observación.</div>
+<div class="legend"><span class="pill ok">✓ CORRECTO</span><span class="pill bad">✕ REVISAR</span><span class="pill empty">— VACÍO</span></div>
+<div class="table-wrap"><table id="grid"><thead><tr>
+<th style="width:75px">Casilla 0</th><th style="width:65px">ID</th><th style="width:125px">Número</th><th style="width:220px">Nombre solicitante</th><th style="width:100px">Fecha</th><th style="width:230px">Dirección</th><th style="width:115px">Teléfono</th><th style="width:230px">Correo</th><th style="width:390px">Observación</th>
+<th class="checkhead" style="width:130px">TELÉFONO</th><th class="checkhead" style="width:130px">CORREO</th><th class="checkhead" style="width:150px">VHINESTROZA</th>
+</tr></thead><tbody id="body"></tbody></table></div>
+<div class="note">Reglas iniciales: se revisa que el teléfono tenga un formato válido, que el correo tenga un formato válido y que la observación use un inicio permitido y termine en IDIPRON_VHINESTROZA. Puedes ajustar las reglas si tu proceso requiere otros textos.</div>
+</main>
+<script>
+const COLS=9, START_ROWS=30;
+const tbody=document.getElementById('body');
+const allowedEmails=new Set(['cadesantalucia@sdp.gov.co','scademanitas@sdp.gov.co','scadecad@sdp.gov.co','scadeamericas@sdp.gov.co','cadefontibon@sdp.gov.co','scadebosa@sdp.gov.co','cademuzu@sdp.gov.co','scadeengativa@sdp.gov.co','cadekennedy@sdp.gov.co']);
+const starts=[
+ /^ENCUESTA\s+PRIMER\s+VEZ$/,
+ /^REENCUESTA\s+RETIRO\s+DEL\s+JEFE\s+DE\s+HOGAR$/,
+ /^REENCUESTA\s+INCLUSION\s+MAS\s+DE\s+3\s+PERSONAS$/,
+ /^REENCUESTA\s+ACTUALIZACION\s+DATOS\s+DE\s+VIVIENDA$/,
+ /^REENCUESTA\s+CAMBIO\s+DE\s+DIRECCION$/,
+ /^REENCUESTA\s+REGISTRO\s+EN\s+VERIFICACION(?:\s*-\s*\d{1,2})?$/
+];
+function makeRow(){
+ const tr=document.createElement('tr');
+ for(let i=0;i<COLS;i++){
+  const td=document.createElement('td');td.className='inputcell';
+  const input=document.createElement('input');input.dataset.col=i;input.setAttribute('aria-label',`Fila ${tbody.children.length+1}, columna ${i+1}`);
+  input.addEventListener('input',()=>validateRow(tr));
+  input.addEventListener('paste',e=>handlePaste(e,tr,i));
+  td.appendChild(input);tr.appendChild(td);
+ }
+ for(let i=0;i<3;i++){const td=document.createElement('td');td.className='result empty';td.textContent='— VACÍO';tr.appendChild(td)}
+ tbody.appendChild(tr);return tr;
+}
+function getVals(tr){return [...tr.querySelectorAll('input')].map(x=>x.value.trim())}
+function checkEmail(v){
+ if(!v)return null;const x=v.trim().toLowerCase();
+ if(allowedEmails.has(x))return true;
+ return /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@(gmail\.com|yahoo\.com|hotmail\.com|outlook\.com|sdp\.gov\.co)$/i.test(x);
+}
+function checkObservation(v){
+ if(!v)return null;
+ const x=v.toUpperCase().trim().replace(/\s+/g,' ');
+ const end='IDIPRON_VHINESTROZA';
+ if(!x.endsWith(end))return false;
+ let start=x.slice(0,x.lastIndexOf(end)).trim();
+ // Permite observaciones adicionales después de un punto, pero valida el encabezado antes del punto.
+ start=(start.split('.')[0]||'').trim().replace(/\s+/g,' ');
+ return starts.some(re=>re.test(start));
+}
+function checkPhone(v){if(!v)return null;const d=v.replace(/\D/g,'');return d.length>=7 && d.length<=15}
+function checkCode(v){if(!v)return null;return v.trim().toUpperCase()==='IDIPRON_VHINESTROZA'}
+function setResult(td,ok,emptyLabel='— VACÍO'){
+ td.className='result '+(ok===null?'empty':ok?'ok':'bad');
+ td.textContent=ok===null?emptyLabel:ok?'✓ CORRECTO':'✕ REVISAR';
+ td.title=ok===false?'Verifica el dato digitado':ok===true?'Validación superada':'No hay dato';
+}
+function validateRow(tr){
+ const v=getVals(tr);
+ // Las columnas amarillas revisan teléfono, correo y observación.
+ setResult(tr.children[9],checkPhone(v[6]));
+ setResult(tr.children[10],checkEmail(v[7]));
+ setResult(tr.children[11],checkObservation(v[8]));
+ updateSummary();
+}
+function validateAll(){[...tbody.children].forEach(validateRow)}
+function updateSummary(){
+ const rows=[...tbody.children].filter(tr=>getVals(tr).some(Boolean));
+ let errors=0,valid=0;
+ rows.forEach(tr=>{const res=[...tr.querySelectorAll('td.result')];if(res.some(td=>td.classList.contains('bad')))errors++;else if(res.every(td=>td.classList.contains('ok')))valid++});
+ document.getElementById('summary').textContent=`${rows.length} registros · ${valid} completos correctos · ${errors} con errores`;
+}
+function handlePaste(e,tr,col){
+ const txt=e.clipboardData?.getData('text');if(!txt||!txt.includes('\t')&&!txt.includes('\n'))return;
+ e.preventDefault();const rows=txt.replace(/\r/g,'').split('\n');if(rows[rows.length-1]==='')rows.pop();
+ let start=[...tbody.children].indexOf(tr);
+ rows.forEach((line,ri)=>{
+  while(tbody.children.length<=start+ri)makeRow();
+  const target=tbody.children[start+ri],cells=line.split('\t');
+  cells.forEach((value,ci)=>{const inp=target.querySelectorAll('input')[col+ci];if(inp)inp.value=value});
+  validateRow(target);
+ });
+}
+for(let i=0;i<START_ROWS;i++)makeRow();
+document.getElementById('validate').onclick=validateAll;
+document.getElementById('add').onclick=()=>{for(let i=0;i<10;i++)makeRow()};
+document.getElementById('clear').onclick=()=>{if(confirm('¿Seguro que quieres borrar todos los datos?')){tbody.innerHTML='';for(let i=0;i<START_ROWS;i++)makeRow();updateSummary()}};
+document.getElementById('copy').onclick=async()=>{
+ validateAll();
+ const lines=[...tbody.children].map(tr=>[...tr.querySelectorAll('input')].map(x=>x.value).concat([...tr.querySelectorAll('td.result')].map(x=>x.textContent)).join('\t')).filter(line=>line.replace(/\t/g,'').trim());
+ try{await navigator.clipboard.writeText(lines.join('\n'));alert('Resultados copiados. Puedes pegarlos en Excel o Google Sheets.')}catch(e){alert('No se pudo copiar automáticamente. Selecciona la tabla y copia manualmente.')}
+};
+</script>
+</body></html>
